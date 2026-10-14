@@ -9,7 +9,8 @@ from src.config import settings
 from src.db.models import Base
 
 
-engine = create_async_engine(settings.database_url, future=True)
+connect_args = {"timeout": 30.0} if "sqlite" in settings.database_url else {}
+engine = create_async_engine(settings.database_url, future=True, connect_args=connect_args)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -57,6 +58,13 @@ async def init_db(custom_engine=None) -> None:
         settings.data_dir  # Ensure data directory exists on disk
 
     async with target_engine.begin() as conn:
+        if "sqlite" in str(target_engine.url):
+            try:
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                await conn.execute(text("PRAGMA busy_timeout=30000"))
+            except Exception:
+                pass
+
         await conn.run_sync(Base.metadata.create_all)
         for stmt in _FTS_SETUP:
             await conn.execute(text(stmt))

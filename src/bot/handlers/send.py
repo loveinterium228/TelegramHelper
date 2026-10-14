@@ -275,7 +275,6 @@ async def cb_confirm(callback: CallbackQuery, userbot_manager: UserbotManager) -
         payload = json.loads(action.payload)
         peer_id = payload["peer_id"]
         text = payload["text"]
-        await delete_pending_action(session, action_id)
 
     try:
         entity = await client.get_entity(peer_id)
@@ -284,8 +283,12 @@ async def cb_confirm(callback: CallbackQuery, userbot_manager: UserbotManager) -
         logger.exception("send_message failed")
         await callback.answer("Ошибка при отправке", show_alert=True)
         if callback.message:
-            await callback.message.edit_text(f"❌ Не удалось отправить: <code>{e}</code>")
+            err_esc = html.escape(str(e))
+            await callback.message.edit_text(f"❌ Не удалось отправить: <code>{err_esc}</code>")
         return
+
+    async with get_session() as session:
+        await delete_pending_action(session, action_id)
 
     if callback.message:
         await callback.message.edit_text("✅ Сообщение отправлено.")

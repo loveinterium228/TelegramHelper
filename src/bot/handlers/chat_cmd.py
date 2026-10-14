@@ -88,8 +88,9 @@ async def cmd_chat(message: Message, command: CommandObject, userbot_manager: Us
 
 
 async def _show_actions(message: Message, candidate: ContactCandidate) -> None:
+    lbl_esc = html.escape(candidate.label())
     await message.answer(
-        f"Выбран: <b>{candidate.label()}</b>. Что сделать?",
+        f"Выбран: <b>{lbl_esc}</b>. Что сделать?",
         reply_markup=_actions_keyboard(candidate.peer_id),
     )
 
@@ -108,9 +109,10 @@ async def cb_pick(callback: CallbackQuery, userbot_manager: UserbotManager) -> N
         owner = await get_or_create_user(session, callback.from_user.id)
         contact = await get_contact(session, owner, peer_id)
     label = contact.display_name if contact else str(peer_id)
+    lbl_esc = html.escape(label)
     if callback.message:
         await callback.message.edit_text(
-            f"Выбран: <b>{label}</b>. Что сделать?",
+            f"Выбран: <b>{lbl_esc}</b>. Что сделать?",
             reply_markup=_actions_keyboard(peer_id),
         )
     await callback.answer()
@@ -224,9 +226,10 @@ async def cb_draft(callback: CallbackQuery, userbot_manager: UserbotManager) -> 
         InlineKeyboardButton(text="❌ Отмена", callback_data=f"send:cancel:{action.id}"),
     )
     name_esc = html.escape(contact.display_name)
+    draft_esc = html.escape(draft)
     if callback.message:
         await callback.message.edit_text(
-            f"💬 <b>Черновик ответа — {name_esc}</b>\n\n{draft}\n\n"
+            f"💬 <b>Черновик ответа — {name_esc}</b>\n\n{draft_esc}\n\n"
             f"Отправить?",
             reply_markup=kb.as_markup(),
         )

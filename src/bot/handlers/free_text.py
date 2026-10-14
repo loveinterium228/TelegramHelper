@@ -180,7 +180,9 @@ async def _execute_intent(intent, message, state, userbot_manager, *, tz_name: s
         for c in items[:30]:
             who = "Я" if c.direction == "mine" else (c.peer_name or "Они")
             d = fmt_local(c.deadline_at, tz_name)
-            lines.append(f"• <b>{who}</b>: {c.text} (до {d})")
+            who_esc = html.escape(who)
+            text_esc = html.escape(c.text)
+            lines.append(f"• <b>{who_esc}</b>: {text_esc} (до {d})")
         await message.answer(
             f"📋 Открытых обязательств: <b>{len(items)}</b>\n\n" + "\n".join(lines)
         )
@@ -339,8 +341,9 @@ async def _execute_intent(intent, message, state, userbot_manager, *, tz_name: s
             action = await create_pending_action(
                 session, user_id=owner.id, kind="send_message", payload=payload
             )
+        draft_esc = html.escape(draft)
         await message.answer(
-            f"💬 <b>Черновик — {name_esc}</b>\n\n{draft}\n\nОтправить?",
+            f"💬 <b>Черновик — {name_esc}</b>\n\n{draft_esc}\n\nОтправить?",
             reply_markup=_confirm_keyboard(action.id),
         )
 
@@ -618,7 +621,8 @@ async def free_voice(
         return
 
     try:
-        await notice.edit_text(f"🎙 <i>Услышал:</i> {text}")
+        esc_text = html.escape(text)
+        await notice.edit_text(f"🎙 <i>Услышал:</i> {esc_text}")
     except Exception:
         pass
 
@@ -698,9 +702,10 @@ async def _exec_add_reminder(intent, message, *, tz_name: str) -> None:
         )
 
     when_str = fmt_local(when, tz_name) if when else "без срока"
-    extra = f" (контакт: {peer_name})" if peer_name else ""
+    text_esc = html.escape(text)
+    extra = f" (контакт: {html.escape(peer_name)})" if peer_name else ""
     note = "" if owner.settings.reminders_enabled else "\n\n⚠ Напоминания выключены — включи в /settings → ⏰."
-    await message.answer(f"⏰ Напоминание добавлено: <b>{text}</b>\nКогда: {when_str}{extra}{note}")
+    await message.answer(f"⏰ Напоминание добавлено: <b>{text_esc}</b>\nКогда: {when_str}{extra}{note}")
 
 
 async def _exec_remove_reminder(intent, message) -> None:
@@ -721,7 +726,7 @@ async def _exec_remove_reminder(intent, message) -> None:
             return
         for c in matched:
             await update_commitment_status(session, c.id, "cancelled")
-    names = "\n".join(f"• {c.text}" for c in matched)
+    names = "\n".join(f"• {html.escape(c.text)}" for c in matched)
     await message.answer(f"🗑 Снял ({len(matched)}):\n{names}")
 
 
@@ -749,6 +754,7 @@ async def _exec_add_reminders_from_chat(intent, message, userbot_manager) -> Non
         return
     target = cands[0]
 
+    target_name_esc = html.escape(target.display_name)
     await message.answer(f"⏳ Подгружаю чат с <b>{target.label()}</b> и извлекаю обещания…")
     msgs = await load_chat(client, message.from_user.id, target.peer_id, limit=80, transcribe=True)
     async with get_session() as session:
@@ -765,8 +771,8 @@ async def _exec_add_reminders_from_chat(intent, message, userbot_manager) -> Non
         who = "Я" if it.get("direction") == "mine" else "Они"
         deadline = it.get("deadline")
         tail = f" · до {deadline}" if deadline else ""
-        lines.append(f"• <b>{who}</b>: {it.get('text', '')}{tail}")
+        lines.append(f"• <b>{who}</b>: {html.escape(it.get('text', ''))}{tail}")
     await message.answer(
-        f"⏰ Поставил {len(items)} напоминаний из чата с {target.display_name}:\n\n"
+        f"⏰ Поставил {len(items)} напоминаний из чата с {target_name_esc}:\n\n"
         + "\n".join(lines)
     )

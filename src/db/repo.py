@@ -7,6 +7,7 @@ import os
 from sqlalchemy import select, text as sql_text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.crypto import decrypt, encrypt
 from src.db.models import (
@@ -24,24 +25,32 @@ from src.db.models import (
 )
 
 
-# Фоновые таски (digest, news, reminders, auto_sync) одновременно тыкаются в
-# get_or_create_user на пустой БД → UNIQUE race. Сериализуем процесс-локом.
-_user_lock = asyncio.Lock()
-
-
 async def get_or_create_user(session: AsyncSession, telegram_id: int) -> User:
-    async with _user_lock:
-        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
-        user = result.scalar_one_or_none()
-        if user is None:
-            user = User(telegram_id=telegram_id, settings=UserSettings())
-            session.add(user)
-            await session.flush()
-        elif user.settings is None:
-            user.settings = UserSettings(user_id=user.id)
-            session.add(user.settings)
-            await session.flush()
-        return user
+    """Атомарное получение или создание пользователя с настройками через SQLite ON CONFLICT DO NOTHING."""
+    stmt_user = (
+        sqlite_insert(User)
+        .values(telegram_id=telegram_id)
+        .on_conflict_do_nothing(index_elements=["telegram_id"])
+    )
+    await session.execute(stmt_user)
+    await session.flush()
+
+    result = await session.execute(
+        select(User).options(selectinload(User.settings)).where(User.telegram_id == telegram_id)
+    )
+    user = result.scalar_one()
+
+    if user.settings is None:
+        stmt_settings = (
+            sqlite_insert(UserSettings)
+            .values(user_id=user.id)
+            .on_conflict_do_nothing(index_elements=["user_id"])
+        )
+        await session.execute(stmt_settings)
+        await session.flush()
+        await session.refresh(user, ["settings"])
+
+    return user
 
 
 async def save_telegram_session(
@@ -54,7 +63,7 @@ async def save_telegram_session(
     phone: str,
     account_label: str | None,
 ) -> None:
-    payload = TelegramSession(
+    stmt = sqlite_insert(TelegramSession).values(
         user_id=user.id,
         api_id=api_id,
         api_hash_enc=encrypt(api_hash),
@@ -62,11 +71,17 @@ async def save_telegram_session(
         phone=phone,
         account_label=account_label,
     )
-    existing = await session.get(TelegramSession, user.id)
-    if existing is not None:
-        await session.delete(existing)
-        await session.flush()
-    session.add(payload)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["user_id"],
+        set_={
+            "api_id": stmt.excluded.api_id,
+            "api_hash_enc": stmt.excluded.api_hash_enc,
+            "session_string_enc": stmt.excluded.session_string_enc,
+            "phone": stmt.excluded.phone,
+            "account_label": stmt.excluded.account_label,
+        },
+    )
+    await session.execute(stmt)
 
 
 async def load_telegram_session(session: AsyncSession, user: User) -> tuple[int, str, str] | None:
@@ -83,15 +98,17 @@ async def delete_telegram_session(session: AsyncSession, user: User) -> None:
 
 
 async def upsert_api_key(session: AsyncSession, user: User, provider: str, key: str) -> None:
-    result = await session.execute(
-        select(ApiKey).where(ApiKey.user_id == user.id, ApiKey.provider == provider)
-    )
-    existing = result.scalar_one_or_none()
     enc = encrypt(key)
-    if existing is None:
-        session.add(ApiKey(user_id=user.id, provider=provider, key_enc=enc))
-    else:
-        existing.key_enc = enc
+    stmt = sqlite_insert(ApiKey).values(
+        user_id=user.id,
+        provider=provider,
+        key_enc=enc,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["user_id", "provider"],
+        set_={"key_enc": stmt.excluded.key_enc},
+    )
+    await session.execute(stmt)
 
 
 async def get_api_key(session: AsyncSession, user: User, provider: str) -> str | None:
@@ -127,35 +144,41 @@ async def upsert_contact(
     is_archived: bool | None = None,
     is_news_source: bool | None = None,
 ) -> Contact:
-    result = await session.execute(
+    insert_values = {
+        "user_id": user.id,
+        "peer_id": peer_id,
+        "peer_kind": peer_kind,
+        "is_bot": is_bot,
+        "is_archived": bool(is_archived) if is_archived is not None else False,
+        "is_news_source": bool(is_news_source) if is_news_source is not None else False,
+        "display_name": display_name,
+        "username": username,
+        "phone": phone,
+    }
+    update_values = {
+        "peer_kind": peer_kind,
+        "is_bot": is_bot,
+        "display_name": display_name,
+        "username": username,
+        "phone": phone,
+    }
+    if is_archived is not None:
+        update_values["is_archived"] = is_archived
+    if is_news_source is not None:
+        update_values["is_news_source"] = is_news_source
+
+    stmt = sqlite_insert(Contact).values(**insert_values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["user_id", "peer_id"],
+        set_=update_values,
+    )
+    await session.execute(stmt)
+    await session.flush()
+
+    res = await session.execute(
         select(Contact).where(Contact.user_id == user.id, Contact.peer_id == peer_id)
     )
-    contact = result.scalar_one_or_none()
-    if contact is None:
-        contact = Contact(
-            user_id=user.id,
-            peer_id=peer_id,
-            peer_kind=peer_kind,
-            is_bot=is_bot,
-            is_archived=bool(is_archived) if is_archived is not None else False,
-            is_news_source=bool(is_news_source) if is_news_source is not None else False,
-            display_name=display_name,
-            username=username,
-            phone=phone,
-        )
-        session.add(contact)
-        await session.flush()
-    else:
-        contact.peer_kind = peer_kind
-        contact.is_bot = is_bot
-        if is_archived is not None:
-            contact.is_archived = is_archived
-        if is_news_source is not None:
-            contact.is_news_source = is_news_source
-        contact.display_name = display_name
-        contact.username = username
-        contact.phone = phone
-    return contact
+    return res.scalar_one()
 
 
 async def list_contacts(
@@ -351,12 +374,19 @@ async def cache_transcript(
     text: str,
     duration_seconds: float | None = None,
 ) -> None:
-    existing = await session.get(TranscriptionCache, file_id)
-    if existing is None:
-        session.add(TranscriptionCache(file_id=file_id, text=text, duration_seconds=duration_seconds))
-    else:
-        existing.text = text
-        existing.duration_seconds = duration_seconds
+    stmt = sqlite_insert(TranscriptionCache).values(
+        file_id=file_id,
+        text=text,
+        duration_seconds=duration_seconds,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["file_id"],
+        set_={
+            "text": stmt.excluded.text,
+            "duration_seconds": stmt.excluded.duration_seconds,
+        },
+    )
+    await session.execute(stmt)
 
 
 async def add_commitment(

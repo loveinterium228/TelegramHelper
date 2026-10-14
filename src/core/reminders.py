@@ -56,7 +56,7 @@ async def _check_once(owner_telegram_id: int) -> None:
     if not to_remind:
         return
 
-    for commitment, reason, _ in to_remind:
+    for commitment, reason, new_status in to_remind:
         who = "Я" if commitment.direction == "mine" else (commitment.peer_name or "Они")
         d = fmt_local(commitment.deadline_at, tz_name)
         who_esc = html.escape(who)
@@ -73,12 +73,12 @@ async def _check_once(owner_telegram_id: int) -> None:
                 f"<b>{who_esc}</b>: {text_esc}\n"
                 f"До: {d}"
             )
-        await notifier.notify(text)
-
-    # помечаем reminded чтобы не дублировать
-    async with get_session() as session:
-        for c, _, new_status in to_remind:
-            await update_commitment_status(session, c.id, new_status)
+        try:
+            await notifier.notify(text)
+            async with get_session() as session:
+                await update_commitment_status(session, commitment.id, new_status)
+        except Exception:
+            logger.exception("Failed to notify or update status for commitment %s", commitment.id)
 
 
 async def reminders_loop() -> None:

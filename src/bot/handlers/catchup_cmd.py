@@ -1,4 +1,6 @@
 """Killer #4: /catchup <контакт> — где мы остановились + черновик ответа."""
+import html
+
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -33,8 +35,9 @@ async def cmd_catchup(message: Message, command: CommandObject, userbot_manager:
         return
     if len(candidates) == 1 or candidates[0].score >= 90:
         # сразу catchup-кнопка через тот же chat:catchup
+        lbl_esc = html.escape(candidates[0].label())
         await message.answer(
-            f"Выбран: <b>{candidates[0].label()}</b>",
+            f"Выбран: <b>{lbl_esc}</b>",
             reply_markup=_actions_keyboard(candidates[0].peer_id),
         )
         return

@@ -35,8 +35,14 @@ def _peer_id_of(msg: TgMessage) -> int | None:
     chat = msg.chat
     if chat is not None:
         return chat.id
-    if msg.peer_id is not None and hasattr(msg.peer_id, "user_id"):
-        return msg.peer_id.user_id
+    if msg.peer_id is not None:
+        pid = (
+            getattr(msg.peer_id, "user_id", None)
+            or getattr(msg.peer_id, "chat_id", None)
+            or getattr(msg.peer_id, "channel_id", None)
+        )
+        if pid is not None:
+            return pid
     return msg.chat_id
 
 

@@ -1,3 +1,5 @@
+import html
+
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
@@ -40,14 +42,16 @@ async def cmd_style(message: Message, command: CommandObject, userbot_manager: U
         return
     target = candidates[0]
     profile = await update_style_profile_for_contact(provider, message.from_user.id, target.peer_id)
+    lbl_esc = html.escape(target.label())
     if not profile:
         await message.answer(
-            f"Не нашёл достаточно моих сообщений к <b>{target.label()}</b>. "
+            f"Не нашёл достаточно моих сообщений к <b>{lbl_esc}</b>. "
             "Сначала открой /chat и подгрузи историю."
         )
         return
 
     short = ", ".join(f"{k}: {v}" for k, v in list(profile.items())[:5] if isinstance(v, (str, int)))
+    short_esc = html.escape(short)
     await message.answer(
-        f"✅ Профиль стиля для <b>{target.label()}</b> обновлён.\n<i>{short}</i>"
+        f"✅ Профиль стиля для <b>{lbl_esc}</b> обновлён.\n<i>{short_esc}</i>"
     )

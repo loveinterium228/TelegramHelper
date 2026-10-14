@@ -207,7 +207,10 @@ async def _build_reply_text(
         return None
 
 
-async def _make_handler(client: TelegramClient, owner_telegram_id: int):
+_active_replies: set[tuple[int, int]] = set()
+
+
+def _make_handler(client: TelegramClient, owner_telegram_id: int):
     """Возвращает event handler, замкнутый на owner_telegram_id."""
 
     async def handler(event: events.NewMessage.Event) -> None:
@@ -221,107 +224,121 @@ async def _make_handler(client: TelegramClient, owner_telegram_id: int):
             if not event.is_private:
                 return
 
-            async with get_session() as session:
-                owner: User = await get_or_create_user(session, owner_telegram_id)
-                if not owner.settings.auto_reply_enabled:
-                    return
-                # игнорируем архив, если опция включена
-                existing = await get_contact(session, owner, sender.id)
-                if owner.settings.ignore_archived and existing is not None and existing.is_archived:
-                    return
-                # запомним контакт
-                parts = [getattr(sender, "first_name", None), getattr(sender, "last_name", None)]
-                display = " ".join(p for p in parts if p).strip() or (sender.username or str(sender.id))
-                await upsert_contact(
-                    session,
-                    owner,
-                    peer_id=sender.id,
-                    peer_kind="user",
-                    is_bot=bool(getattr(sender, "bot", False)),
-                    display_name=display,
-                    username=getattr(sender, "username", None),
-                    phone=getattr(sender, "phone", None),
-                )
-
-            is_offline = await _is_offline(client)
-            always_reply = getattr(owner.settings, "auto_reply_always", False)
-            if not is_offline and not always_reply:
-                logger.info("auto-reply: owner is ONLINE and auto_reply_always=False, skipping for %s", sender.id)
+            reply_key = (owner_telegram_id, sender.id)
+            if reply_key in _active_replies:
+                logger.info("auto-reply: already generating reply for %s, skipping duplicate event", sender.id)
                 return
-
-            cooldown = owner.settings.auto_reply_cooldown_min
-            if await _recently_replied(owner.id, sender.id, cooldown):
-                logger.info("auto-reply: cooldown active (%d min) for %s, skipping", cooldown, sender.id)
-                return
-
-            incoming_text = msg.text or msg.message or ""
-            if not incoming_text.strip():
-                return  # медиа без текста — не отвечаем автоматически
-
-            logger.info("auto-reply: preparing response for %s: %r", display, incoming_text[:80])
-
-            # перечитаем настройки для режима/текста
-            async with get_session() as session:
-                owner = await get_or_create_user(session, owner_telegram_id)
-                mode = owner.settings.auto_reply_mode
-                static_text = owner.settings.auto_reply_text or ""
-
-            if mode == "smart":
-                reply = await _build_reply_text(
-                    owner_telegram_id, sender.id, display, incoming_text
-                )
-                if not reply:
-                    logger.warning("auto-reply: empty or failed LLM response for %s", sender.id)
-                    return
-            else:  # static (default)
-                reply = _clean_reply(static_text)
-                if not reply:
-                    return
-
-            async with get_session() as session:
-                owner = await get_or_create_user(session, owner_telegram_id)
-                is_first = await _is_first_reply(owner.id, sender.id)
-            if is_first and FIRST_REPLY_NOTE:
-                reply = f"{reply}\n\n{FIRST_REPLY_NOTE}"
-
-            # Реалистичная человеческая пауза (чтение + набор)
-            read_delay = random.uniform(1.8, 3.5)
-            await asyncio.sleep(read_delay)
+            _active_replies.add(reply_key)
 
             try:
-                await client.send_read_acknowledge(event.chat_id, max_id=msg.id)
-            except Exception:
-                pass
+                async with get_session() as session:
+                    owner: User = await get_or_create_user(session, owner_telegram_id)
+                    if not owner.settings.auto_reply_enabled:
+                        return
+                    # игнорируем архив, если опция включена
+                    existing = await get_contact(session, owner, sender.id)
+                    if owner.settings.ignore_archived and existing is not None and existing.is_archived:
+                        return
+                    # запомним контакт
+                    parts = [getattr(sender, "first_name", None), getattr(sender, "last_name", None)]
+                    display = " ".join(p for p in parts if p).strip() or (sender.username or str(sender.id))
+                    await upsert_contact(
+                        session,
+                        owner,
+                        peer_id=sender.id,
+                        peer_kind="user",
+                        is_bot=bool(getattr(sender, "bot", False)),
+                        display_name=display,
+                        username=getattr(sender, "username", None),
+                        phone=getattr(sender, "phone", None),
+                    )
 
-            typing_delay = min(5.0, max(1.8, len(reply) * 0.08 + random.uniform(0.5, 1.2)))
-            try:
-                async with client.action(event.chat_id, "typing"):
+                is_offline = await _is_offline(client)
+                always_reply = getattr(owner.settings, "auto_reply_always", False)
+                if not is_offline and not always_reply:
+                    logger.info("auto-reply: owner is ONLINE and auto_reply_always=False, skipping for %s", sender.id)
+                    return
+
+                cooldown = owner.settings.auto_reply_cooldown_min
+                if await _recently_replied(owner.id, sender.id, cooldown):
+                    logger.info("auto-reply: cooldown active (%d min) for %s, skipping", cooldown, sender.id)
+                    return
+
+                incoming_text = msg.text or msg.message or ""
+                if not incoming_text.strip():
+                    return  # медиа без текста — не отвечаем автоматически
+
+                logger.info("auto-reply: preparing response for %s: %r", display, incoming_text[:80])
+
+                # перечитаем настройки для режима/текста
+                async with get_session() as session:
+                    owner = await get_or_create_user(session, owner_telegram_id)
+                    mode = owner.settings.auto_reply_mode
+                    static_text = owner.settings.auto_reply_text or ""
+
+                if mode == "smart":
+                    reply = await _build_reply_text(
+                        owner_telegram_id, sender.id, display, incoming_text
+                    )
+                    if not reply:
+                        logger.warning("auto-reply: empty or failed LLM response for %s", sender.id)
+                        return
+                else:  # static (default)
+                    reply = _clean_reply(static_text)
+                    if not reply:
+                        return
+
+                async with get_session() as session:
+                    owner = await get_or_create_user(session, owner_telegram_id)
+                    is_first = await _is_first_reply(owner.id, sender.id)
+                if is_first and FIRST_REPLY_NOTE:
+                    reply = f"{reply}\n\n{FIRST_REPLY_NOTE}"
+
+                # Реалистичная человеческая пауза (чтение + набор)
+                read_delay = random.uniform(1.8, 3.5)
+                await asyncio.sleep(read_delay)
+
+                try:
+                    await client.send_read_acknowledge(event.chat_id, max_id=msg.id)
+                except Exception:
+                    pass
+
+                typing_delay = min(5.0, max(1.8, len(reply) * 0.08 + random.uniform(0.5, 1.2)))
+                try:
+                    async with client.action(event.chat_id, "typing"):
+                        await asyncio.sleep(typing_delay)
+                except Exception:
                     await asyncio.sleep(typing_delay)
-            except Exception:
-                await asyncio.sleep(typing_delay)
 
-            await event.respond(reply)
-            logger.info("auto-reply: sent reply to %s: %r", display, reply[:80])
+                # Повторная проверка: если владелец вышел в онлайн во время набора — отменяем отправку
+                if not always_reply and not await _is_offline(client):
+                    logger.info("auto-reply: owner came online during delay, aborting reply for %s", sender.id)
+                    return
 
-            async with get_session() as session:
-                owner = await get_or_create_user(session, owner_telegram_id)
-                await add_auto_reply_log(
-                    session,
-                    user_id=owner.id,
-                    peer_id=sender.id,
-                    peer_name=display,
-                    incoming_text=incoming_text[:500],
-                    reply_text=reply,
+                await event.respond(reply)
+                logger.info("auto-reply: sent reply to %s: %r", display, reply[:80])
+
+                async with get_session() as session:
+                    owner = await get_or_create_user(session, owner_telegram_id)
+                    await add_auto_reply_log(
+                        session,
+                        user_id=owner.id,
+                        peer_id=sender.id,
+                        peer_name=display,
+                        incoming_text=incoming_text[:500],
+                        reply_text=reply,
+                    )
+
+                disp_esc = html.escape(display)
+                in_esc = html.escape(incoming_text[:200])
+                rep_esc = html.escape(reply)
+                await notifier.notify(
+                    f"🤖 <b>Авто-ответ</b> для <b>{disp_esc}</b>\n\n"
+                    f"<i>Им:</i> {in_esc}\n"
+                    f"<i>Я:</i> {rep_esc}"
                 )
-
-            disp_esc = html.escape(display)
-            in_esc = html.escape(incoming_text[:200])
-            rep_esc = html.escape(reply)
-            await notifier.notify(
-                f"🤖 <b>Авто-ответ</b> для <b>{disp_esc}</b>\n\n"
-                f"<i>Им:</i> {in_esc}\n"
-                f"<i>Я:</i> {rep_esc}"
-            )
+            finally:
+                _active_replies.discard(reply_key)
         except Exception:
             logger.exception("auto-reply handler failed")
 
@@ -329,10 +346,6 @@ async def _make_handler(client: TelegramClient, owner_telegram_id: int):
 
 
 def attach_auto_reply(client: TelegramClient, owner_telegram_id: int) -> None:
-
-    async def _wrapper(event):
-        h = await _make_handler(client, owner_telegram_id)
-        await h(event)
-
-    client.add_event_handler(_wrapper, events.NewMessage(incoming=True))
+    handler = _make_handler(client, owner_telegram_id)
+    client.add_event_handler(handler, events.NewMessage(incoming=True))
     logger.info("Auto-reply handler attached for user %s", owner_telegram_id)

@@ -1,3 +1,4 @@
+import html
 import logging
 
 from aiogram import Router
@@ -254,7 +255,8 @@ async def _finalize_login(message: Message, state: FSMContext, userbot_manager: 
 
     userbot_manager.register_client(tg_id, pending.client)
     await state.clear()
+    label_esc = html.escape(label)
     await message.answer(
-        f"✅ Аккаунт <b>{label}</b> подключён. Сессия сохранена в зашифрованном виде.\n\n"
+        f"✅ Аккаунт <b>{label_esc}</b> подключён. Сессия сохранена в зашифрованном виде.\n\n"
         "Дальше — /settings, чтобы выбрать LLM и настроить авто-ответ."
     )

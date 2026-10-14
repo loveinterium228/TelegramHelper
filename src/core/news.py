@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import math
 from datetime import datetime, timedelta, timezone
@@ -204,7 +205,8 @@ async def news_scheduler_loop() -> None:
                             text = await build_news_digest(
                                 client, owner_id, topic, hours=hours,
                             )
-                            await notifier.notify(f"<b>«{topic}»</b>\n\n{text}")
+                            topic_esc = html.escape(topic)
+                            await notifier.notify(f"<b>«{topic_esc}»</b>\n\n{text}")
                         except Exception:
                             logger.exception("news topic failed: %s", topic)
         except Exception:

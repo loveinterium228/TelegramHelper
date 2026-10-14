@@ -1,4 +1,5 @@
 """/news <тема> и /news_channels — управление новостными каналами."""
+import html
 import re
 
 from aiogram import F, Router
@@ -56,7 +57,8 @@ async def cmd_news(message: Message, command: CommandObject, userbot_manager: Us
         await message.answer("Укажи тему после команды.")
         return
 
-    await message.answer(f"📰 Готовлю дайджест по «<i>{topic}</i>» за последние {hours}ч…")
+    top_esc = html.escape(topic)
+    await message.answer(f"📰 Готовлю дайджест по «<i>{top_esc}</i>» за последние {hours}ч…")
     text = await build_news_digest(client, message.from_user.id, topic, hours=hours)
     await message.answer(text, disable_web_page_preview=True)
 
