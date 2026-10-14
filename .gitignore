@@ -1,0 +1,44 @@
+# Environments & Secrets
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+
+# Data & Persistence
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.session
+*.session-journal
+
+# Python Bytecode & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# IDE & Editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Testing & Quality Assurance
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+
+# OS Generated
+.DS_Store
+Thumbs.db
+desktop.ini
