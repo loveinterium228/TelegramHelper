@@ -15,6 +15,8 @@
 </p>
 <p align="center">
   Autonomous dual-engine architecture combining MTProto Userbot capabilities with an aiogram 3 control cockpit, hybrid full-text & semantic vector RAG, multi-provider LLM intent dispatch, and zero-trust Fernet encryption.
+<p align="center">
+  <img src="docs/screenshots/01_telegram_assistant_cockpit.png" alt="TelegramHelper Cockpit Interface" width="880" />
 </p>
 
 </div>
@@ -311,6 +313,22 @@ tests/test_vector_store.py::test_vector_store_in_memory_upsert_and_search PASSED
 - **Data Sovereignty**: Message history and voice transcriptions reside exclusively on your host machine.
 - **Strict Single-Tenant Authorization**: All handlers and callbacks are wrapped with the `OwnerOnly` filter.
 - **Two-Phase Action Dispatch**: Any outbound transmission triggers a staged `PendingAction` that requires manual UI confirmation.
+
+---
+
+## 🖼 Visual Interface Gallery
+
+<div align="center">
+
+| Executive Morning Briefing | Commitments & Task Radar |
+|:---:|:---:|
+| <img src="docs/screenshots/02_executive_morning_digest.png" width="440" /> | <img src="docs/screenshots/03_commitments_task_radar.png" width="440" /> |
+
+| Hybrid Search (FTS5 + Vector) | High-Performance Test Suite |
+|:---:|:---:|
+| <img src="docs/screenshots/04_hybrid_search_rag.png" width="440" /> | <img src="docs/screenshots/05_developer_terminal_test_suite.png" width="440" /> |
+
+</div>
 
 ---
 
